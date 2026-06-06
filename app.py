@@ -1,186 +1,133 @@
 # ==========================================
 # CELL 2: BUILD THE AI VISION APP (app.py)
-# FIXED: Using gemini-2.5-flash (current model)
+# FUNGSI: Pengekstrakan Warna Tudung Muslimah & Eksport Excel
 # ==========================================
 
-
+%%writefile app.py
 import streamlit as st
+import pandas as pd
+import io
 from google import genai
 from google.genai import types
 from PIL import Image
-import json
 import traceback
 
-# --- PAGE CONFIGURATION ---
+# --- KONFIGURASI HALAMAN ---
 st.set_page_config(
-    page_title="Vision AI Data Extractor | MISDEC",
-    page_icon="🤖",
+    page_title="Penganalisis Warna Tudung AI",
+    page_icon="🧕",
     layout="centered"
 )
 
-# --- HEADER ---
-st.title("📄 AI Vision: Document Data Extractor")
-st.caption("Built for MISDEC AI Training • Cik Kiah War Room")
+# --- PENGENALAN SISTEM ---
+st.title("🧕 AI Vision: Analisis Warna Tudung")
+st.caption("Sistem Cadangan & Pengekstrakan Warna Berstruktur")
 st.markdown("---")
 st.markdown(
-    "Upload a document image (receipt, invoice, form, handwriting) and watch "
-    "Gemini AI extract structured data in seconds. ✨"
+    "Muat naik imej model atau tudung. Sistem AI Gemini akan mengekstrak **3 warna utama** "
+    "yang paling dominan atau sesuai, memaparkan kod warna, dan membenarkan muat turun laporan dalam format Excel."
 )
 
-# --- SIDEBAR: API KEY ---
+# --- PANEL SISI: KUNCI API ---
 with st.sidebar:
-    st.header("⚙️ System Setup")
+    st.header("⚙️ Tetapan Sistem")
     api_key = st.text_input(
-        "Enter your Gemini API Key:",
+        "Masukkan Gemini API Key:",
         type="password",
-        help="Get it from Google AI Studio"
+        help="Diperlukan untuk menghubungkan aplikasi dengan model Gemini AI."
     )
-    st.markdown(
-        "🔑 [Get your API Key](https://aistudio.google.com/app/apikey)"
+    st.markdown("🔑 [Dapatkan API Key di Google AI Studio](https://aistudio.google.com/app/apikey)")
+
+# --- PROMPT BERASASKAN FORMULA CRAFT ---
+default_prompt = """[CONTEXT] Anda adalah sistem analisis visi fesyen AI yang canggih, mengkhususkan dalam fesyen dan penggayaan tudung Muslimah.
+[ROLE] Bertindak sebagai Penganalisis Warna Fesyen Profesional.
+[ACTION] Analisis imej yang dimuat naik, kenal pasti dan cadangkan 3 warna tudung Muslimah yang paling menonjol atau paling sesuai berserta skor keyakinannya.
+[FORMAT] Output MESTILAH secara eksklusif dalam format raw CSV (Comma Separated Values) dengan penamaan lajur yang tepat. Tiada teks pengenalan, tiada penutup, dan jangan gunakan pemformatan blok kod (seperti ```csv). 
+Format lajur mestilah: Kedudukan,Nama Warna,Kod Hex,Skor Keyakinan (%)
+[TASK] Susun 3 warna tersebut secara menurun bermula dengan skor tertinggi. Pastikan Nama Warna adalah nama komersial yang elegan (contoh: Dusty Rose, Emerald Green) dan Kod Hex adalah tepat (contoh: #DCAE96)."""
+
+with st.expander("📝 Penyesuaian Arahan AI (CRAFT Prompt)"):
+    prompt = st.text_area(
+        "Ubah suai arahan pengekstrakan di sini jika perlu:",
+        value=default_prompt,
+        height=250
     )
 
-    # --- API Key Tester Button ---
-    st.divider()
-    if st.button("🧪 Test API Key", use_container_width=True):
-        if not api_key:
-            st.error("Paste a key first")
-        else:
-            try:
-                client = genai.Client(api_key=api_key)
-                test_response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=["Say hello in one word"]
-                )
-                st.success(f"✅ Key works! Response: {test_response.text}")
-            except Exception as e:
-                st.error(f"❌ RAW ERROR:\n\n{type(e).__name__}: {str(e)}")
-                st.code(traceback.format_exc())
-
-    st.divider()
-    st.caption("💡 Your API key is never stored. Stays in your browser only.")
-    st.divider()
-    st.caption("🎓 MISDEC AI Vision Training")
-    st.caption("Trainer: Muhammad Nur Aqmal bin Khatiman")
-
-# --- MAIN: FILE UPLOAD ---
+# --- PEMPROSESAN MUAT NAIK IMEJ ---
 uploaded_file = st.file_uploader(
-    "📁 Upload your document image:",
-    type=["jpg", "png", "jpeg", "webp"],
-    help="Max 10MB. Works best with clear, well-lit images."
+    "📁 Muat naik imej tudung (Format: JPG, PNG):",
+    type=["jpg", "png", "jpeg"],
+    help="Saiz maksimum: 10MB."
 )
 
-# --- DEFAULT PROMPT ---
-default_prompt = """You are a professional data extraction assistant.
-
-Extract these fields into JSON:
-- document_type: receipt | invoice | claim_form | other
-- date: YYYY-MM-DD, or null
-- currency: MYR | USD | GBP | AUD | null   (detect from the document)
-- vendor_name: string, or null
-- total_amount: number only; null if absent (null is NOT 0.00)
-- key_items: list of { "item": string|null, "amount": number|null }
-
-Rules:
-1. Every field present. If genuinely absent/unreadable, use null — never guess.
-2. null = "not in the document"; 0.00 = the document says zero.
-3. Preserve original language for text fields.
-"""
-
-# --- PROMPT EDITOR ---
-st.markdown("### 🎯 AI Instruction (Prompt)")
-prompt = st.text_area(
-    "Edit the prompt to customize what you want to extract:",
-    value=default_prompt,
-    height=250,
-    label_visibility="collapsed"
-)
-
-# --- ACTION BUTTON ---
-if st.button("🚀 Extract Data with AI", type="primary", use_container_width=True):
-
+if st.button("🚀 Analisis Warna (Jana Excel)", type="primary", use_container_width=True):
+    
+    # Pengesahan pra-syarat
     if not api_key:
-        st.error("❌ Please enter your Gemini API Key in the sidebar.")
+        st.error("❌ Sila masukkan Gemini API Key pada panel sisi terlebih dahulu.")
         st.stop()
-
+        
     if not uploaded_file:
-        st.error("❌ Please upload a document image first.")
-        st.stop()
-
-    if uploaded_file.size > 10 * 1024 * 1024:
-        st.error("❌ File too large. Please upload an image under 10MB.")
+        st.error("❌ Sila muat naik imej sebelum memulakan analisis.")
         st.stop()
 
     try:
+        # Membaca imej yang dimuat naik
         image = Image.open(uploaded_file)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### 📷 Your Document")
-            st.image(image, use_container_width=True)
+        st.markdown("### 📷 Imej Sumber")
+        st.image(image, use_container_width=True)
 
         client = genai.Client(api_key=api_key)
 
-        with col2:
-            st.markdown("#### ✨ AI Extraction Result")
-            with st.spinner("🧠 AI is analyzing your document..."):
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[prompt, image],
-                    config=types.GenerateContentConfig(
-                        temperature=0.1,
-                        response_mime_type="application/json",
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
-                    )
+        with st.spinner("🧠 Al sedang menjalankan pengekstrakan fotometrik dan analisis warna..."):
+            # Menjana respons menggunakan model vision[cite: 1]
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[prompt, image],
+                config=types.GenerateContentConfig(
+                    temperature=0.2, # Suhu rendah untuk ketepatan analitikal
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 )
+            )
 
-                raw_text = response.text.strip()
-                if raw_text.startswith("```json"):
-                    raw_text = raw_text[7:]
-                if raw_text.startswith("```"):
-                    raw_text = raw_text[3:]
-                if raw_text.endswith("```"):
-                    raw_text = raw_text[:-3]
-                raw_text = raw_text.strip()
+            # Pembersihan rentetan teks (sanitize string)
+            raw_text = response.text.strip()
+            raw_text = raw_text.replace("
+```csv", "").replace("```", "").strip()
 
-                try:
-                    parsed_json = json.loads(raw_text)
-                    st.success("✅ Data extracted successfully!")
-                    st.json(parsed_json)
+            # Penguraian data (Parsing) kepada Jadual Mendatar (Pandas DataFrame)
+            df = pd.read_csv(io.StringIO(raw_text))
 
-                    json_str = json.dumps(parsed_json, indent=2, ensure_ascii=False)
-                    st.download_button(
-                        label="⬇️ Download JSON",
-                        data=json_str,
-                        file_name="extracted_data.json",
-                        mime="application/json",
-                        use_container_width=True
-                    )
-                except json.JSONDecodeError:
-                    st.warning("⚠️ AI returned data but not strict JSON.")
-                    st.code(raw_text, language="json")
+            st.success("✅ Analisis berjaya disempurnakan!")
+            
+            # Paparan Jadual Mendatar
+            st.markdown("### 📊 Jadual Keputusan Analisis Warna")
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
+            # Generasi Fail Excel dalam Memori
+            output_excel = io.BytesIO()
+            with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Analisis Warna')
+            excel_data = output_excel.getvalue()
+
+            # Butang Muat Turun Eksklusif
+            st.markdown("### 💾 Eksport Data")
+            st.download_button(
+                label="📥 Muat Turun Laporan (Format .xlsx)",
+                data=excel_data,
+                file_name="Analisis_Warna_Tudung_Muslimah.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+    except pd.errors.ParserError:
+        st.error("❌ Ralat Pemprosesan Data: Model AI gagal mengembalikan format CSV yang sah. Sila cuba analisis semula.")
+        st.code(raw_text)
     except Exception as e:
         error_msg = str(e)
-        if "API key" in error_msg or "API_KEY" in error_msg or "401" in error_msg:
-            st.error(
-                "❌ Invalid API Key. Double-check the key you pasted. "
-                "Get a new one from [Google AI Studio](https://aistudio.google.com/app/apikey)."
-            )
-        elif "quota" in error_msg.lower() or "rate" in error_msg.lower() or "429" in error_msg:
-            st.error(
-                "❌ Rate limit hit. Wait 1 minute and try again. "
-                "Free tier has limits — that's normal."
-            )
-        elif "404" in error_msg or "NOT_FOUND" in error_msg:
-            st.error(
-                "❌ Model not found. The model name might be outdated. "
-                "Contact trainer for assistance."
-            )
-        else:
-            st.error(f"❌ System Error: {error_msg}")
+        st.error(f"❌ Ralat Kesisteman Kritis: {error_msg}")
+        st.code(traceback.format_exc())
 
-# --- FOOTER ---
+# --- PENUTUP ---
 st.markdown("---")
-st.caption(
-    "🎓 Building AI Vision App with Gemini API • "
-    "MISDEC Melaka • 06 June 2026"
-)
+st.caption("Pembangunan Aplikasi Automasi Berstruktur • Dikuasakan oleh algoritma analisis visual pemampatan tinggi.")

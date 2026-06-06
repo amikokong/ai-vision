@@ -209,5 +209,5 @@ if st.button(
 st.markdown("---")
 
 st.caption(
-    "AI Vision • Analisis Warna Tudung Muslimah • Streamlit + Gemini @sulaimanosman03@gmail.com"
+    "AI Vision • Analisis Warna Tudung Muslimah by Sulaiman Osman • Streamlit + Gemini "
 )

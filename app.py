@@ -1,205 +1,177 @@
 import streamlit as st
 import pandas as pd
 import io
-from PIL import Image
 import traceback
-
+from PIL import Image, ImageDraw, ImageFont
 from google import genai
 from google.genai import types
 
 # ==========================================
-# KONFIGURASI HALAMAN
+# CONFIG
 # ==========================================
 
 st.set_page_config(
-    page_title="Penganalisis Warna Tudung AI",
+    page_title="AI Hijab Color Matching",
     page_icon="🧕",
     layout="centered"
 )
 
-# ==========================================
-# HEADER
-# ==========================================
-
-st.title("🧕 AI Vision: Analisis Warna Tudung")
-st.caption("Sistem Cadangan & Pengekstrakan Warna Berstruktur")
-
-st.markdown("""
-Muat naik imej model atau tudung.
-
-AI Gemini akan mengenal pasti **3 warna utama yang paling dominan atau sesuai**, lengkap dengan:
-
-- Nama warna
-- Kod Hex
-- Skor keyakinan
-
-Keputusan boleh dimuat turun dalam format Excel.
-""")
+st.title("🧕 AI Hijab Color Matching + Visual Palette")
+st.markdown("Upload imej → AI cadang warna tudung → jana visual 1:1")
 
 # ==========================================
 # SIDEBAR
 # ==========================================
 
 with st.sidebar:
-    st.header("⚙️ Tetapan Sistem")
-
-    api_key = st.text_input(
-        "Gemini API Key",
-        type="password"
-    )
-
-    st.markdown(
-        "[🔑 Dapatkan API Key](https://aistudio.google.com/app/apikey)"
-    )
+    st.header("⚙️ API Setting")
+    api_key = st.text_input("Gemini API Key", type="password")
+    st.markdown("[Get API Key](https://aistudio.google.com/app/apikey)")
 
 # ==========================================
-# PROMPT
+# PROMPT (COLOR MATCHING)
 # ==========================================
 
-default_prompt = """
-[CONTEXT]
-Anda adalah sistem analisis visi fesyen AI yang canggih.
+prompt = """
+Anda adalah pakar color matching fesyen Muslimah.
 
-[ROLE]
-Bertindak sebagai Penganalisis Warna Fesyen Profesional.
+Tugas:
+Analisis pakaian dalam imej dan cadangkan 5 warna tudung yang sesuai.
 
-[ACTION]
-Analisis imej yang dimuat naik dan kenal pasti 3 warna tudung Muslimah yang paling sesuai.
+Wajib output CSV SAHAJA:
 
-[FORMAT]
-Output MESTILAH dalam format CSV sahaja.
+Clothing Color,Clothing HEX,Hijab Color,Hijab HEX,Style,Score,Reason
 
-Kedudukan,Nama Warna,Kod Hex,Skor Keyakinan (%)
-
-[TASK]
-Susun daripada skor tertinggi ke skor terendah.
+Rules:
+- HEX mesti tepat
+- Score 0–100
+- Fokus pada fashion harmony
+- Gunakan neutral & elegant palette
 """
 
-with st.expander("📝 Penyesuaian Prompt"):
-    prompt = st.text_area(
-        "Prompt Analisis",
-        value=default_prompt,
-        height=250
-    )
-
 # ==========================================
-# UPLOAD FILE
+# UPLOAD IMAGE
 # ==========================================
 
 uploaded_file = st.file_uploader(
-    "📁 Muat Naik Imej",
+    "📁 Upload Image",
     type=["jpg", "jpeg", "png"]
 )
 
 # ==========================================
-# PROSES ANALISIS
+# FUNCTION: CREATE PALETTE IMAGE (1:1)
 # ==========================================
 
-if st.button(
-    "🚀 Analisis Warna (Jana Excel)",
-    type="primary",
-    use_container_width=True
-):
+def create_palette_image(df):
+    img = Image.new("RGB", (1080, 1080), "white")
+    draw = ImageDraw.Draw(img)
+
+    # Title
+    draw.text((40, 30), "Hijab Color Matching Palette", fill="black")
+
+    y = 120
+    box_size = 160
+
+    for i, row in df.iterrows():
+        color = row["Hijab HEX"]
+
+        # color box
+        draw.rectangle(
+            [50, y, 50 + box_size, y + box_size],
+            fill=color
+        )
+
+        # text
+        draw.text(
+            (230, y + 50),
+            f"{row['Hijab Color']} ({row['Score']}%)",
+            fill="black"
+        )
+
+        draw.text(
+            (230, y + 90),
+            str(row["Hijab HEX"]),
+            fill="gray"
+        )
+
+        y += 190
+
+    return img
+
+# ==========================================
+# MAIN PROCESS
+# ==========================================
+
+if st.button("🚀 Generate Color Matching", use_container_width=True):
 
     if not api_key:
-        st.error("Sila masukkan Gemini API Key.")
+        st.error("Sila masukkan API Key")
         st.stop()
 
-    if uploaded_file is None:
-        st.error("Sila muat naik imej.")
+    if not uploaded_file:
+        st.error("Sila upload image")
         st.stop()
 
     try:
-
         image = Image.open(uploaded_file)
-
-        st.image(
-            image,
-            caption="Imej Sumber",
-            use_container_width=True
-        )
+        st.image(image, caption="Input Image", use_container_width=True)
 
         client = genai.Client(api_key=api_key)
 
-        with st.spinner("🧠 AI sedang menganalisis warna..."):
+        with st.spinner("AI sedang analisis warna..."):
 
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[prompt, image],
                 config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_budget=0
-                    )
+                    temperature=0.2
                 )
             )
 
-            raw_text = response.text.strip()
+            raw = response.text.strip()
+            raw = raw.replace("```csv", "").replace("```", "").strip()
 
-            # Bersihkan markdown
-            raw_text = raw_text.replace("```csv", "")
-            raw_text = raw_text.replace("```", "")
-            raw_text = raw_text.strip()
+            df = pd.read_csv(io.StringIO(raw))
 
-            st.subheader("📄 Respons Mentah AI")
-            st.code(raw_text)
+        st.success("Analisis selesai!")
 
-            # Convert CSV kepada DataFrame
-            df = pd.read_csv(io.StringIO(raw_text))
+        st.subheader("📊 Result Table")
+        st.dataframe(df, use_container_width=True)
 
-            # Pastikan ada data
-            if df.empty:
-                st.error("Tiada data ditemui.")
-                st.stop()
+        # ==================================
+        # VISUAL PALETTE IMAGE
+        # ==================================
 
-            st.success("✅ Analisis Berjaya")
+        palette_img = create_palette_image(df)
 
-            st.subheader("📊 Keputusan Analisis")
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True
-            )
+        st.subheader("🎨 Visual Palette (1:1)")
+        st.image(palette_img, use_container_width=True)
 
-            # ==================================
-            # JANA EXCEL
-            # ==================================
+        # SAVE IMAGE
+        buf = io.BytesIO()
+        palette_img.save(buf, format="PNG")
+        byte_im = buf.getvalue()
 
-            output = io.BytesIO()
-
-            with pd.ExcelWriter(
-                output,
-                engine="openpyxl"
-            ) as writer:
-
-                df.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="Analisis Warna"
-                )
-
-            excel_data = output.getvalue()
-
-            st.download_button(
-                label="📥 Muat Turun Excel",
-                data=excel_data,
-                file_name="Analisis_Warna_Tudung.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-
-    except pd.errors.ParserError:
-
-        st.error(
-            "AI tidak mengembalikan CSV yang sah."
+        st.download_button(
+            "📥 Download Palette Image",
+            data=byte_im,
+            file_name="hijab_palette.png",
+            mime="image/png"
         )
 
-        st.code(raw_text)
+        # SAVE EXCEL
+        excel_buf = io.BytesIO()
+        df.to_excel(excel_buf, index=False)
+
+        st.download_button(
+            "📥 Download Excel",
+            data=excel_buf.getvalue(),
+            file_name="color_matching.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-
-        st.error(f"Ralat: {e}")
-
+        st.error("Error berlaku")
         st.code(traceback.format_exc())
 
 # ==========================================
@@ -207,7 +179,4 @@ if st.button(
 # ==========================================
 
 st.markdown("---")
-
-st.caption(
-    "AI Vision • Analisis Warna Tudung Muslimah by Sulaiman Osman • Streamlit + Gemini "
-)
+st.caption("AI Color Matching System • Streamlit + Gemini + PIL")
